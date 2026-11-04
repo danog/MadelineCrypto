@@ -1,211 +1,63 @@
-# madeline_crypto
+# MadelineCrypto
 
-Native (Rust) cryptography for [MadelineProto](https://github.com/danog/MadelineProto) and the
-[php-rtc](https://github.com/danog/php-rtc) stack: AES-256-IGE and MTProto 2.0 transport decoding on a
-worker thread (batched, off the PHP thread), and per-packet AES-GCM/CTR/CBC, hashes and HMAC, several
-times faster than the PHP builtins on small inputs. Optional: without it, MadelineProto and php-rtc use
-their PHP implementations.
+Native (Rust) cryptography extension for [MadelineProto](https://github.com/danog/MadelineProto) and
+[php-rtc](https://github.com/danog/php-rtc): MTProto AES-256-IGE and transport decoding on a worker
+thread, per-packet AES-GCM/CTR/CBC, hashes and HMAC several times faster than the PHP builtins on small
+inputs, and the factorization of the auth key exchange. Optional: without it, MadelineProto and php-rtc
+use their PHP implementations.
 
 ## Install
 
-With [PIE](https://github.com/php/pie) (PHP 8.2 or later, NTS):
+With [PIE](https://github.com/php/pie) (PHP 8.2+, NTS):
 
 ```sh
 pie install danog/madelinecrypto
 ```
 
-PIE downloads a prebuilt binary when the release has one for the platform (Linux glibc 2.35+ x86_64
-and arm64, macOS arm64 and x86_64, Windows x86_64; PHP 8.2-8.5; OpenSSL linked statically), and
-otherwise builds from source, which needs [Rust](https://rustup.rs), libclang and the OpenSSL headers
-(see Build). The Docker image `danog/madelineproto` includes the extension.
+Releases include prebuilt binaries for Linux (glibc 2.35+, x86_64 and arm64), macOS (arm64 and x86_64) and
+Windows (x86_64), for PHP 8.2 to 8.5. Elsewhere PIE builds from source, which needs
+[Rust](https://rustup.rs), libclang and the OpenSSL headers. The `danog/madelineproto` Docker image
+includes the extension.
 
-## API 0.5: the per-packet and per-message primitives
+## API
 
-`Crypto::version()` is `0.5.0`; callers check
-`\extension_loaded('madeline_crypto') && version_compare(Crypto::version(), '0.5.0', '>=')` once
-and keep their PHP implementation as the fallback. Besides the executor's IGE and transport
-decoding, the extension exports the primitives that gain from Rust because they run per packet or
-per message (namespace `danog\MadelineProto\Native`, all `final`, see `stubs/crypto.php`):
-`AesGcm`, `AesCtr` (stateful keystream), `AesCtrKey` (fresh IV per call), `AesCbc`, `AesIge`
-(synchronous, small payloads), `Hmac`, `Hash`. They are synchronous and need no `init()` (IPC
-clients, tests, php-rtc standalone). Key objects schedule their key (GHASH key, HMAC inner/outer
-state) once in the constructor, zeroize it on drop and can't be cloned or serialized. A call looks
-nothing up by name and allocates only the returned string: the hot methods are raw handlers
-reading their arguments from the call frame (ext-php-rs's generated handlers allocate a parser per
-call, as much as the AES-GCM of a 160-byte packet), taking strings only, as with `strict_types`.
-KDFs, big integers and public-key cryptography stay on the PHP builtins: one call costs
-microseconds to milliseconds, where the per-call overhead Rust removes doesn't matter.
+Namespace `danog\MadelineProto\Native`, see [`stubs/crypto.php`](stubs/crypto.php). `Crypto::version()`
+is the API version (`0.6.0`); callers check it and keep a PHP fallback.
 
-Backends: AES-128/256-GCM below 2 KiB use ring's kernels (139 ns per 160-byte packet against 222 ns
-for a reused, key-scheduled EVP context, measured in Rust); from 2 KiB, and AES-192-GCM, a reused
-key-scheduled EVP context (ring seals in place only, so it copies the input first, and its kernels
-aren't faster than OpenSSL's: 0.74-0.82x at 64 KiB on x86 and ARM); CTR and CBC EVP, with the
-ciphers fetched once per process; hashes and HMAC OpenSSL's low-level SHA/MD5 contexts
-(SHA-NI), held inline. Validation errors are `\ValueError` and never fall back; GCM tags are
-checked in constant time (and unauthenticated plaintext wiped). Outputs match the PHP builtins
-byte for byte. `random_bytes`, `hash_equals` and `crc32` are deliberately not provided.
+- `Crypto`: `init()` starts the worker thread (bridged to Revolt by
+  [php-tokio](https://github.com/danog/php-tokio)), `ige()` and `decode()` run on it, `decodeSync()` on the
+  PHP thread; `factorize()` returns the smallest prime factor of a 64-bit integer (MTProto's `pq`).
+- `AesGcm`, `AesCtr`, `AesCtrKey`, `AesCbc`, `AesIge`, `Hmac`, `Hash`: synchronous, no `init()`
+  needed. Key objects schedule their key once, zeroize it when freed, and can't be cloned or serialized.
+  Outputs match the PHP builtins byte for byte; invalid sizes or algorithms throw `\ValueError`, and a GCM
+  tag mismatch returns `false` (constant-time check).
 
-Per call, from PHP (ns, Intel N100, PHP 8.5, best of 5 runs of 200000):
-
-| Operation | 160 B | 1200 B |
-|---|---|---|
-| `openssl_encrypt()` aes-128-gcm / `AesGcm(128)->encrypt()` | 2189 / 200 | 2879 / 655 |
-| `openssl_decrypt()` aes-128-gcm / `AesGcm(128)->decrypt()` | 2252 / 193 | 2781 / 533 |
-| `sodium_crypto_aead_aes256gcm_encrypt()` / `AesGcm(256)->encrypt()` | 343 / 209 | 1114 / 736 |
-| `openssl_encrypt()` aes-128-ctr / `AesCtrKey->apply()` / `AesCtr->process()` | 1617 / 166 / 117 | 1930 / 305 / 277 |
-| `hash_hmac()` sha1 / `Hmac->mac()` | 1356 / 349 | 3942 / 825 |
-| `hash_hmac()` sha256 / `Hmac->mac()` | 589 / 394 | 1218 / 961 |
-| `sha1()` / `Hash::digest('sha1')` | 602 / 221 | 3287 / 744 |
-| `hash('sha256')` / `Hash::digest('sha256')` | 252 / 238 | 1018 / 813 |
-
-One-shot IGE and inbound transport messages up to 16 KiB are processed synchronously (`AesIge`,
-and `Crypto::decodeSync()`, which runs the executor's Decode — KDF, IGE kernels, constant-time
-msg_key check, length and padding checks — on the PHP thread, failing with the same codes). The
-executor's cost for small messages is on the PHP side: suspending and resuming the caller (the
-read loop, for inbound messages) and the wakeup callback, against 0.6 µs of AES for 64 bytes. An
-end-to-end benchmark (parallel 256 MiB transfers plus 5000 small RPCs, perf-counted) measured −6%
-instructions per RPC for synchronous outbound IGE and a further −9% instructions and −14% cycles
-for synchronous inbound decoding, with transfers unchanged; thresholds of 1, 4 and 16 KiB were
-indistinguishable. Larger payloads and IGE streams use the executor as before.
-
-The optional IGEFFI fallback requires enabled FFI and compatible libcrypto symbols;
-it has no dependency on the removed C helper.
-
-## Build
-
-PHP 8.2 or later is required (8.1 would build, but isn't tested): the extension marks its classes `ZEND_ACC_NOT_SERIALIZABLE`, calls
-the engine's `zend_argument_type_error()` and `zend_zval_type_name()` from its raw method
-handlers, and allocates result strings with the `zend_string` header layout and `GC_STRING`
-type info of PHP 8 (as `zend_string_alloc()` does).
-The current bridge supports NTS PHP; ZTS initialization falls back to PHP.
-Build for the target PHP version, architecture and debug ABI.
-Install that PHP's development headers and `php-config`, OpenSSL development
-headers, a linker, pkg-config and libclang. Rust 1.92.0 is pinned by
-`rust-toolchain.toml`; Cargo.lock pins all transitive dependencies (ring also needs a C compiler). API 0.4 accepts queue count
-and byte limit, and `init()` returns php-tokio's notification stream; width is always selected
-adaptively.
-
-From source with PIE or phpize (configure finds cargo in `PATH` or `~/.cargo/bin`, or takes
-`--with-cargo=/path/to/cargo`):
+## Build from source
 
 ```sh
-phpize && ./configure && make && make install
+phpize && ./configure && make && sudo make install   # what PIE runs; configure takes --with-cargo=PATH
 ```
 
-Or with cargo alone:
-
-```sh
-cargo build --release --locked
-install -m 755 target/release/libmadeline_crypto.so "$(php-config --extension-dir)/madeline_crypto.so"
-printf 'extension=madeline_crypto.so\n' > /path/to/php/conf.d/madeline-crypto.ini
-php --ri madeline_crypto
-```
-
-The `vendored-openssl` feature links a static OpenSSL built from source (it needs perl, and NASM
-on Windows): the prebuilt binaries use it.
-
-On macOS Cargo produces a `.dylib`; install it under the same `.so` extension
-name. `.cargo/config.toml` links it with `-undefined dynamic_lookup` (PHP's symbols resolve at load
-time) and skips the strip pass, whose output macOS 27's dyld rejects ("mis-aligned LINKEDIT string
-pool"). On Windows, ext-php-rs downloads the PHP development pack matching `php.exe`; set
-`LIBCLANG_PATH` to LLVM's `bin`, and build with nightly Rust (`RUSTUP_TOOLCHAIN=nightly-2026-11-01`,
-as CI does): PHP for Windows calls internal functions with `__vectorcall`, which Rust only has as the
-unstable `abi_vectorcall`. Release binaries are built and tested by CI, so users don't need it. Restart PHP processes after installation.
+or `cargo build --release --locked` and copy `target/release/libmadeline_crypto.{so,dylib}` (or
+`madeline_crypto.dll`) to PHP's extension directory as `madeline_crypto.so` (`php_madeline_crypto.dll`).
+The `vendored-openssl` feature links OpenSSL statically, as the prebuilt binaries do. On Windows, build with
+nightly Rust: PHP calls extension functions with `__vectorcall`, which needs Rust's unstable
+`abi_vectorcall`.
 
 ## Tests
 
 ```sh
-cargo test --release --locked --no-default-features --features const-widths   # Rust, no PHP needed
-cargo build --release --locked && composer install
-php -d extension=$(tests/library-path.sh) vendor/bin/phpunit                  # against the PHP builtins
-```
-
-CI runs both on Linux (x86_64, arm64), macOS (arm64, x86_64) and Windows with PHP 8.2-8.5, and
-installs the extension through PIE from source. Publishing a GitHub release builds, tests and
-attaches the prebuilt binaries.
-
-## Execution and ownership
-
-The MTProto owner initializes the extension and php-tokio bridge at startup.
-IPC-only clients do not start it. PHP adapters retain only bridge lifecycle and
-IGE per-instance sequencing. There is no PHP submit/collect/release protocol.
-The extension exports `danog\MadelineProto\Native\Crypto`; factories check the
-extension and API version before selecting it. Validation errors
-never trigger backend retries; an operation the executor did not perform (closed,
-or too large for the queue) runs on the synchronous PHP backends instead.
-
-Each initialized process has exactly one crypto worker and one Tokio scheduler
-thread for completion/admission futures. No Tokio blocking jobs are spawned.
-The scheduler never invokes PHP. PHP values and suspended Revolt contexts stay
-on the PHP thread. The bridge is [php-tokio](https://github.com/danog/php-tokio) 0.2, with a
-runtime of the extension's own (`EventLoop::init_with`). Its notification stream stays open until
-the bridge is destroyed.
-
-The queue defaults to 128 live jobs and 128 MiB of accounted native storage.
-Admission reserves both count and byte permits before copying input. Accounting
-covers input, output, the PHP result copy, key schedules and metadata;
-permits are held through result consumption. Oversized jobs use the PHP backends.
-Waiting for admission suspends the Fiber. Cancelling an external Amp wait does
-not cancel its underlying operation: accepted work completes, commits IGE state
-under its instance mutex, then releases buffers. Native secrets and unsuccessful
-plaintext are zeroized on drop.
-
-Shutdown (a PHP shutdown function) stops admission, finishes accepted jobs, joins the
-crypto thread, resumes every suspended caller and destroys the bridge and Tokio,
-without running the event loop: if it runs again, the callers continue and admission
-waiters fall back to PHP. At RSHUTDOWN no PHP code runs: callers still suspended are
-released without being resumed. Initialize **after** any
-fork; an inherited initialized executor is rejected, and factories use PHP.
-Live extension objects are never serialized with MTProto sessions.
-
-Inbound transport v2 performs KDF, IGE, constant-time msg_key verification,
-length/alignment and padding checks before exposing body and metadata. ReadLoop
-retains connection/key freshness, session/message ID and TL checks. Secret chats
-retain their own PHP KDF and verification while using the IGE interface.
-
-## Adaptive batching
-
-Independent chains of the same operation and size bucket are interleaved at each
-AES round. Unequal lengths share their common prefix and finish their short tails
-with the continued IV directly in the original buffers. Batches of up to three chains, whose
-speed is the latency of one block, keep every XOR off the dependency chain: with a the AES output
-before its last key XOR, y_i = a_i ^ k14 ^ x_{i-1}, so the next block's input
-x_{i+1} ^ y_i ^ k0 = a_i ^ (x_{i+1} ^ x_{i-1} ^ k14 ^ k0) folds into a round key computed from the
-inputs (for encryption, that is CBC over p_i ^ p_{i-2}). Wider batches keep the direct form: the
-AES units are busy anyway, and the folded form's extra XORs and loads cost issue slots.
-Hardware AES is detected at runtime (`std::arch` ARM AES /
-x86 AES-NI); unsupported CPUs use EVP inside the same executor.
-
-Each operation/size bucket starts at width N=1. Complete batches alternate N and
-N+1. Measure crypto worker thread CPU nanoseconds per byte, including KDF and
-verification for transport messages. Incomplete batches execute normally and do
-not enter the comparison. After at least `3*(N+1)` samples on **each** side,
-compare medians and calculate:
-
-```
-gain = 100 * (median_N - median_N_plus_1) / median_N
-checks = ceil(3 * (N+1) * clamp(2 / max(0.25, abs(gain-1)), 1, 8))
-```
-
-Keep alternating until both sides meet that count. At gain >=1%, advance N by
-one and start a fresh comparison; otherwise permanently lock the smaller width.
-There is no width-8 ceiling: the configured live-job capacity is the resource
-limit. A batch takes only the compatible jobs already queued and never waits for
-more: jobs submitted while a batch runs form the next one, so a lone job never waits. Const-generic widths 1–32 are enabled by
-default; larger widths use the dynamic kernel.
-
-## Verification
-
-```sh
-cargo test --release --locked --no-default-features
 cargo test --release --locked --no-default-features --features const-widths
+cargo build --release --locked && composer install
+php -d extension=$(tests/library-path.sh) vendor/bin/phpunit
 ```
 
-Rust tests cover the known vectors of the primitives (NIST GCM, RFC 3686, SP 800-38A,
-RFC 2104/2202/4231); PHP tests (`NativePrimitivesTest`) compare every class against the PHP
-builtins on random inputs. PHP tests cover known vectors, continuation/IV, independent and ordered chains,
-validation failures, queue pressure, cancellation, shutdown, connection freshness
-and PHP fallbacks. Run the same suite with and without the extension enabled.
+CI runs them on Linux, macOS and Windows with PHP 8.2 to 8.5, and installs the extension with PIE.
 
-The extension release is reported by `phpversion("madeline_crypto")`.
-`Crypto::version()` reports the PHP API version, currently `0.5.0`.
+## Design
+
+Internals (the executor, batching, backend choices and their measurements): [DESIGN.md](DESIGN.md).
+
+## License
+
+AGPL-3.0-only.
