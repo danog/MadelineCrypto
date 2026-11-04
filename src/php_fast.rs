@@ -19,6 +19,7 @@ use ext_php_rs::{
     flags::{DataType, MethodFlags},
     types::{ZendClassObject, Zval},
     zend::{ce, ExecuteData},
+    zend_fastcall,
 };
 
 extern "C" {
@@ -82,9 +83,14 @@ fn ret(retval: &mut Zval, result: PhpResult<Zval>) {
         Err(e) => e.throw(),
     }
 }
+/// A raw method handler: extern "C", or __vectorcall on Windows (ZEND_FASTCALL); see zend_fastcall!.
+#[cfg(not(windows))]
+type Handler = extern "C" fn(&mut ExecuteData, &mut Zval);
+#[cfg(windows)]
+type Handler = extern "vectorcall" fn(&mut ExecuteData, &mut Zval);
 fn method<const N: usize>(
     name: &str,
-    handler: extern "C" fn(&mut ExecuteData, &mut Zval),
+    handler: Handler,
     args: [&str; N],
     returns: Option<DataType>,
 ) -> FunctionBuilder<'static> {
@@ -103,35 +109,39 @@ fn public_static() -> MethodFlags {
 }
 
 const GCM_ENCRYPT: [&str; 3] = ["nonce", "aad", "plaintext"];
-extern "C" fn gcm_encrypt(ex: &mut ExecuteData, retval: &mut Zval) {
-    let Some([nonce, aad, plaintext]) = args(ex, &GCM_ENCRYPT) else {
-        return;
-    };
-    let Some(this) = this::<AesGcm>(ex) else {
-        return;
-    };
-    ret(
-        retval,
-        try_output_uninit(plaintext.len() + p::GCM_TAG, |out| {
-            this.0.encrypt_into(nonce, aad, plaintext, out)
-        }),
-    );
+zend_fastcall! {
+    extern "C" fn gcm_encrypt(ex: &mut ExecuteData, retval: &mut Zval) {
+        let Some([nonce, aad, plaintext]) = args(ex, &GCM_ENCRYPT) else {
+            return;
+        };
+        let Some(this) = this::<AesGcm>(ex) else {
+            return;
+        };
+        ret(
+            retval,
+            try_output_uninit(plaintext.len() + p::GCM_TAG, |out| {
+                this.0.encrypt_into(nonce, aad, plaintext, out)
+            }),
+        );
+    }
 }
 const GCM_DECRYPT: [&str; 4] = ["nonce", "aad", "ciphertext", "tag"];
-extern "C" fn gcm_decrypt(ex: &mut ExecuteData, retval: &mut Zval) {
-    let Some([nonce, aad, ciphertext, tag]) = args(ex, &GCM_DECRYPT) else {
-        return;
-    };
-    let Some(this) = this::<AesGcm>(ex) else {
-        return;
-    };
-    let (value, ok) = output_uninit(ciphertext.len(), |out| {
-        this.0.decrypt_into(nonce, aad, ciphertext, tag, out)
-    });
-    match ok {
-        Ok(true) => *retval = value,
-        Ok(false) => retval.set_bool(false),
-        Err(e) => PhpException::from(e).throw(),
+zend_fastcall! {
+    extern "C" fn gcm_decrypt(ex: &mut ExecuteData, retval: &mut Zval) {
+        let Some([nonce, aad, ciphertext, tag]) = args(ex, &GCM_DECRYPT) else {
+            return;
+        };
+        let Some(this) = this::<AesGcm>(ex) else {
+            return;
+        };
+        let (value, ok) = output_uninit(ciphertext.len(), |out| {
+            this.0.decrypt_into(nonce, aad, ciphertext, tag, out)
+        });
+        match ok {
+            Ok(true) => *retval = value,
+            Ok(false) => retval.set_bool(false),
+            Err(e) => PhpException::from(e).throw(),
+        }
     }
 }
 pub fn aes_gcm(class: ClassBuilder) -> ClassBuilder {
@@ -144,30 +154,34 @@ pub fn aes_gcm(class: ClassBuilder) -> ClassBuilder {
 }
 
 const CTR_PROCESS: [&str; 1] = ["data"];
-extern "C" fn ctr_process(ex: &mut ExecuteData, retval: &mut Zval) {
-    let Some([data]) = args(ex, &CTR_PROCESS) else {
-        return;
-    };
-    let Some(this) = this::<AesCtr>(ex) else {
-        return;
-    };
-    ret(
-        retval,
-        try_output_uninit(data.len(), |out| this.0.process_into(data, out)),
-    );
+zend_fastcall! {
+    extern "C" fn ctr_process(ex: &mut ExecuteData, retval: &mut Zval) {
+        let Some([data]) = args(ex, &CTR_PROCESS) else {
+            return;
+        };
+        let Some(this) = this::<AesCtr>(ex) else {
+            return;
+        };
+        ret(
+            retval,
+            try_output_uninit(data.len(), |out| this.0.process_into(data, out)),
+        );
+    }
 }
 const CTR_ONCE: [&str; 3] = ["key", "iv", "data"];
-extern "C" fn ctr_once(ex: &mut ExecuteData, retval: &mut Zval) {
-    let Some([key, iv, data]) = args(ex, &CTR_ONCE) else {
-        return;
-    };
-    ret(
-        retval,
-        // The key schedule is built after the output allocation (see output()).
-        try_output_uninit(data.len(), |out| {
-            p::AesCtr::new(key, Some(iv))?.process_into(data, out)
-        }),
-    );
+zend_fastcall! {
+    extern "C" fn ctr_once(ex: &mut ExecuteData, retval: &mut Zval) {
+        let Some([key, iv, data]) = args(ex, &CTR_ONCE) else {
+            return;
+        };
+        ret(
+            retval,
+            // The key schedule is built after the output allocation (see output()).
+            try_output_uninit(data.len(), |out| {
+                p::AesCtr::new(key, Some(iv))?.process_into(data, out)
+            }),
+        );
+    }
 }
 pub fn aes_ctr(class: ClassBuilder) -> ClassBuilder {
     class
@@ -182,17 +196,19 @@ pub fn aes_ctr(class: ClassBuilder) -> ClassBuilder {
 }
 
 const CTR_APPLY: [&str; 2] = ["iv", "data"];
-extern "C" fn ctr_apply(ex: &mut ExecuteData, retval: &mut Zval) {
-    let Some([iv, data]) = args(ex, &CTR_APPLY) else {
-        return;
-    };
-    let Some(this) = this::<AesCtrKey>(ex) else {
-        return;
-    };
-    ret(
-        retval,
-        try_output_uninit(data.len(), |out| this.0.apply_into(iv, data, out)),
-    );
+zend_fastcall! {
+    extern "C" fn ctr_apply(ex: &mut ExecuteData, retval: &mut Zval) {
+        let Some([iv, data]) = args(ex, &CTR_APPLY) else {
+            return;
+        };
+        let Some(this) = this::<AesCtrKey>(ex) else {
+            return;
+        };
+        ret(
+            retval,
+            try_output_uninit(data.len(), |out| this.0.apply_into(iv, data, out)),
+        );
+    }
 }
 pub fn aes_ctr_key(class: ClassBuilder) -> ClassBuilder {
     class.method(
@@ -202,32 +218,36 @@ pub fn aes_ctr_key(class: ClassBuilder) -> ClassBuilder {
 }
 
 const HMAC_MAC: [&str; 1] = ["data"];
-extern "C" fn hmac_mac(ex: &mut ExecuteData, retval: &mut Zval) {
-    let Some([data]) = args(ex, &HMAC_MAC) else {
-        return;
-    };
-    let Some(this) = this::<Hmac>(ex) else {
-        return;
-    };
-    *retval = output(this.0.algo().size(), |out| this.0.mac_into(data, out)).0;
+zend_fastcall! {
+    extern "C" fn hmac_mac(ex: &mut ExecuteData, retval: &mut Zval) {
+        let Some([data]) = args(ex, &HMAC_MAC) else {
+            return;
+        };
+        let Some(this) = this::<Hmac>(ex) else {
+            return;
+        };
+        *retval = output(this.0.algo().size(), |out| this.0.mac_into(data, out)).0;
+    }
 }
 const HMAC_COMPUTE: [&str; 3] = ["algo", "key", "data"];
-extern "C" fn hmac_compute(ex: &mut ExecuteData, retval: &mut Zval) {
-    let Some([algo, key, data]) = args(ex, &HMAC_COMPUTE) else {
-        return;
-    };
-    ret(
-        retval,
-        Algo::parse_bytes(algo)
-            .map_err(PhpException::from)
-            // The keyed pads are built after the output allocation (see output()).
-            .map(|algo| {
-                output(algo.size(), |out| {
-                    p::Hmac::new(algo, key).mac_into(data, out)
-                })
-                .0
-            }),
-    );
+zend_fastcall! {
+    extern "C" fn hmac_compute(ex: &mut ExecuteData, retval: &mut Zval) {
+        let Some([algo, key, data]) = args(ex, &HMAC_COMPUTE) else {
+            return;
+        };
+        ret(
+            retval,
+            Algo::parse_bytes(algo)
+                .map_err(PhpException::from)
+                // The keyed pads are built after the output allocation (see output()).
+                .map(|algo| {
+                    output(algo.size(), |out| {
+                        p::Hmac::new(algo, key).mac_into(data, out)
+                    })
+                    .0
+                }),
+        );
+    }
 }
 pub fn hmac(class: ClassBuilder) -> ClassBuilder {
     class
@@ -247,29 +267,33 @@ pub fn hmac(class: ClassBuilder) -> ClassBuilder {
 }
 
 const HASH_UPDATE: [&str; 1] = ["data"];
-extern "C" fn hash_update(ex: &mut ExecuteData, _retval: &mut Zval) {
-    let Some([data]) = args(ex, &HASH_UPDATE) else {
-        return;
-    };
-    let Some(this) = this::<Hash>(ex) else {
-        return;
-    };
-    match this.0.as_mut() {
-        Some(digest) => digest.update(data),
-        None => crate::php_api::finalized().throw(),
+zend_fastcall! {
+    extern "C" fn hash_update(ex: &mut ExecuteData, _retval: &mut Zval) {
+        let Some([data]) = args(ex, &HASH_UPDATE) else {
+            return;
+        };
+        let Some(this) = this::<Hash>(ex) else {
+            return;
+        };
+        match this.0.as_mut() {
+            Some(digest) => digest.update(data),
+            None => crate::php_api::finalized().throw(),
+        }
     }
 }
 const HASH_DIGEST: [&str; 2] = ["algo", "data"];
-extern "C" fn hash_digest(ex: &mut ExecuteData, retval: &mut Zval) {
-    let Some([algo, data]) = args(ex, &HASH_DIGEST) else {
-        return;
-    };
-    ret(
-        retval,
-        Algo::parse_bytes(algo)
-            .map_err(PhpException::from)
-            .map(|algo| output(algo.size(), |out| p::digest_into(algo, data, out)).0),
-    );
+zend_fastcall! {
+    extern "C" fn hash_digest(ex: &mut ExecuteData, retval: &mut Zval) {
+        let Some([algo, data]) = args(ex, &HASH_DIGEST) else {
+            return;
+        };
+        ret(
+            retval,
+            Algo::parse_bytes(algo)
+                .map_err(PhpException::from)
+                .map(|algo| output(algo.size(), |out| p::digest_into(algo, data, out)).0),
+        );
+    }
 }
 pub fn hash(class: ClassBuilder) -> ClassBuilder {
     class

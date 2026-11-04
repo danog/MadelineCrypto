@@ -108,7 +108,9 @@ On macOS Cargo produces a `.dylib`; install it under the same `.so` extension
 name. `.cargo/config.toml` links it with `-undefined dynamic_lookup` (PHP's symbols resolve at load
 time) and skips the strip pass, whose output macOS 27's dyld rejects ("mis-aligned LINKEDIT string
 pool"). On Windows, ext-php-rs downloads the PHP development pack matching `php.exe`; set
-`LIBCLANG_PATH` to LLVM's `bin`. Restart PHP processes after installation.
+`LIBCLANG_PATH` to LLVM's `bin`, and build with nightly Rust (`RUSTUP_TOOLCHAIN=nightly-2026-11-01`,
+as CI does): PHP for Windows calls internal functions with `__vectorcall`, which Rust only has as the
+unstable `abi_vectorcall`. Release binaries are built and tested by CI, so users don't need it. Restart PHP processes after installation.
 
 ## Tests
 

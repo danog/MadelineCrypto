@@ -21,6 +21,9 @@ case "$(uname -s)" in
     # modules (Locale::Maketext::Simple) and makes OpenSSL configure for the wrong platform.
     echo "OPENSSL_SRC_PERL=C:\\Strawberry\\perl\\bin\\perl.exe" >> "$GITHUB_ENV"
     echo "PERL=C:\\Strawberry\\perl\\bin\\perl.exe" >> "$GITHUB_ENV"
+    # ext-php-rs needs nightly on Windows (PHP's handlers are __vectorcall: abi_vectorcall). Pinned.
+    rustup toolchain install nightly-2026-11-01 --profile minimal >/dev/null
+    echo "RUSTUP_TOOLCHAIN=nightly-2026-11-01" >> "$GITHUB_ENV"
     features="vendored-openssl"
     ;;
 esac
