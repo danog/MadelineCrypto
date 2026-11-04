@@ -7,6 +7,13 @@ case "$(uname -s)" in
   Linux)
     sudo apt-get update -qq
     sudo apt-get install -y -qq libclang-dev libssl-dev pkg-config >/dev/null
+    # bindgen loads the newest libclang it finds, but parses the clang headers of the LLVM libclang-dev
+    # installed: on Ubuntu 22.04 (several LLVMs) a newer libclang failed on LLVM 14's emmintrin.h. Use
+    # that LLVM's libclang.
+    v="$(dpkg-query -W -f='${Depends}' libclang-dev | sed -n 's/.*libclang-\([0-9][0-9]*\)-dev.*/\1/p')"
+    if [ -n "$v" ] && [ -d "/usr/lib/llvm-$v/lib" ]; then
+      echo "LIBCLANG_PATH=/usr/lib/llvm-$v/lib" >> "$GITHUB_ENV"
+    fi
     ;;
   Darwin)
     echo "OPENSSL_DIR=$(brew --prefix openssl@3)" >> "$GITHUB_ENV"
