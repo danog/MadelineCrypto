@@ -16,7 +16,14 @@ case "$(uname -s)" in
     # OpenSSL built from source and linked statically (the runner has Strawberry Perl; NASM for its asm).
     choco install -y --no-progress nasm >/dev/null
     echo "C:\\Program Files\\NASM" >> "$GITHUB_PATH"
-    echo "LIBCLANG_PATH=C:\\Program Files\\LLVM\\bin" >> "$GITHUB_ENV"
+    # bindgen's libclang must match the clang headers it parses: with a VS environment (msvc-dev-cmd) those
+    # are VS's bundled LLVM's, so use its libclang too (a different one fails on mmintrin.h's __m64).
+    vs_llvm="${VCINSTALLDIR:-}Tools\\Llvm\\x64\\bin"
+    if [ -n "${VCINSTALLDIR:-}" ] && [ -f "$(cygpath -u "$vs_llvm")/libclang.dll" ]; then
+      echo "LIBCLANG_PATH=$vs_llvm" >> "$GITHUB_ENV"
+    else
+      echo "LIBCLANG_PATH=C:\\Program Files\\LLVM\\bin" >> "$GITHUB_ENV"
+    fi
     # openssl-src's Configure needs a native perl: the bash steps would find Git's MSYS perl, which lacks
     # modules (Locale::Maketext::Simple) and makes OpenSSL configure for the wrong platform.
     echo "OPENSSL_SRC_PERL=C:\\Strawberry\\perl\\bin\\perl.exe" >> "$GITHUB_ENV"
