@@ -6,6 +6,7 @@
 #![cfg_attr(all(windows, feature = "php-extension"), feature(abi_vectorcall))]
 mod crypto;
 mod executor;
+mod factorize;
 #[cfg(any(target_arch = "aarch64", target_arch = "x86_64"))]
 mod hardware;
 #[cfg(feature = "php-extension")]

@@ -25,8 +25,26 @@ final class PrimitivesTest extends TestCase
     public function testTheExtensionIsLoaded(): void
     {
         self::assertTrue(\extension_loaded('madeline_crypto'), 'Run the tests with -d extension=madeline_crypto');
-        self::assertSame('0.5.0', Crypto::version());
+        self::assertSame('0.6.0', Crypto::version());
         self::assertSame((string) phpversion('madeline_crypto'), (new \ReflectionExtension('madeline_crypto'))->getVersion());
+    }
+
+    /** MTProto's pq (the product of two ~31-bit primes), and what isn't composite. */
+    public function testFactorize(): void
+    {
+        self::assertSame(0x494C553B, Crypto::factorize(0x17ED48941A08F981));
+        $primes = [1_000_000_007, 1_229_739_323, 1_402_015_859, 2_147_483_629, 2_147_483_647];
+        foreach ($primes as $p) {
+            foreach ($primes as $q) {
+                if ($p !== $q) {
+                    self::assertSame(min($p, $q), Crypto::factorize($p * $q), "$p * $q");
+                }
+            }
+        }
+        self::assertSame(2, Crypto::factorize(1 << 40));
+        foreach ([-15, 0, 1, 2, 3, 2_147_483_647] as $n) {
+            $this->assertValueError(static fn () => Crypto::factorize($n));
+        }
     }
 
     /** Large inputs: 512 KiB file parts, through the EVP path of GCM, and through CTR and CBC. */

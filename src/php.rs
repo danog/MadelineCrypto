@@ -23,7 +23,16 @@ pub struct Crypto;
 #[php_impl]
 impl Crypto {
     pub fn version() -> &'static str {
-        "0.5.0" // PHP API compatibility, independent of the extension release.
+        "0.6.0" // PHP API compatibility, independent of the extension release.
+    }
+    /// The smallest prime factor of `pq` (MTProto's auth key exchange; was PrimeModule-ext).
+    /// \ValueError if `pq` isn't a composite number.
+    pub fn factorize(pq: i64) -> PhpResult<i64> {
+        u64::try_from(pq)
+            .ok()
+            .and_then(crate::factorize::smallest_prime_factor)
+            .map(|p| p as i64)
+            .ok_or_else(|| PhpException::new("Not a composite number".into(), 0, ce::value_error()))
     }
     /// Returns the stream to watch for php-tokio's notifications.
     pub fn init(capacity: i64, byte_limit: i64) -> PhpResult<Zval> {
