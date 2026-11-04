@@ -21,6 +21,11 @@ case "$(uname -s)" in
     # modules (Locale::Maketext::Simple) and makes OpenSSL configure for the wrong platform.
     echo "OPENSSL_SRC_PERL=C:\\Strawberry\\perl\\bin\\perl.exe" >> "$GITHUB_ENV"
     echo "PERL=C:\\Strawberry\\perl\\bin\\perl.exe" >> "$GITHUB_ENV"
+    # The MSVC linker of the toolset msvc-dev-cmd selected, by full path: in bash steps, Git's coreutils
+    # link.exe comes first in PATH, and rustc runs it once a VS environment is set.
+    if [ -n "${VCToolsInstallDir:-}" ]; then
+      echo "CARGO_TARGET_X86_64_PC_WINDOWS_MSVC_LINKER=${VCToolsInstallDir}bin\\Hostx64\\x64\\link.exe" >> "$GITHUB_ENV"
+    fi
     # ext-php-rs needs nightly on Windows (PHP's handlers are __vectorcall: abi_vectorcall). Pinned.
     rustup toolchain install nightly-2026-11-01 --profile minimal >/dev/null
     echo "RUSTUP_TOOLCHAIN=nightly-2026-11-01" >> "$GITHUB_ENV"
