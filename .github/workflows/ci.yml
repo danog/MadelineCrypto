@@ -32,7 +32,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-24.04, ubuntu-24.04-arm, macos-15, macos-15-intel, windows-2025]
+        os: [ubuntu-24.04, ubuntu-24.04-arm, macos-15, macos-15-intel, windows-2022]
         php: ["8.2", "8.3", "8.4", "8.5"]
     steps:
       - uses: actions/checkout@v4
@@ -44,6 +44,14 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           key: php${{ matrix.php }}
+      - name: MSVC toolset of the PHP build (Windows)
+        # PHP refuses extensions linked with a newer toolset than its own: 14.29 (VS16) for PHP 8.2/8.3,
+        # 14.4x (VS17) for 8.4/8.5, as php-windows-builder does.
+        if: runner.os == 'Windows'
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+          toolset: ${{ (matrix.php == '8.2' || matrix.php == '8.3') && '14.29' || '14.4' }}
       - name: Native dependencies
         id: deps
         shell: bash
