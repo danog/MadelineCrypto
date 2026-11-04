@@ -1,0 +1,34 @@
+{
+    "name": "danog/madelinecrypto",
+    "description": "Native (Rust) cryptography for MadelineProto and php-rtc: AES-IGE and MTProto transport decoding off the PHP thread, per-packet AES-GCM/CTR/CBC, hashes and HMAC",
+    "type": "php-ext",
+    "license": "AGPL-3.0-only",
+    "keywords": ["madelineproto", "telegram", "mtproto", "crypto", "aes", "rust", "extension"],
+    "homepage": "https://github.com/danog/MadelineCrypto",
+    "authors": [
+        {"name": "Alexander Pankratov", "email": "s.pankratoff@gmail.com"},
+        {"name": "Daniil Gentili", "email": "daniil@daniil.it"}
+    ],
+    "require": {
+        "php": ">=8.2"
+    },
+    "require-dev": {
+        "phpunit/phpunit": "^11.5",
+        "revolt/event-loop": "^1.0.9"
+    },
+    "autoload-dev": {
+        "psr-4": {"danog\\MadelineCrypto\\Test\\": "tests/"}
+    },
+    "php-ext": {
+        "extension-name": "madeline_crypto",
+        "support-zts": false,
+        "download-url-method": ["pre-packaged-binary", "composer-default"],
+        "configure-options": [
+            {
+                "name": "with-cargo",
+                "description": "Path to cargo (default: from PATH or ~/.cargo/bin)",
+                "needs-value": true
+            }
+        ]
+    }
+}

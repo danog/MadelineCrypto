@@ -175,11 +175,8 @@ pub(crate) fn evp(message: &mut Message) -> Result<()> {
     let mut state = Zeroizing::new(*message.iv);
     let mut block = Zeroizing::new([0u8; 32]);
     let mut transformed = Zeroizing::new([0u8; 32]);
-    for (input, output) in message
-        .input
-        .chunks_exact(16)
-        .zip(message.output.chunks_exact_mut(16))
-    {
+    let (outputs, _) = message.output.as_chunks_mut::<16>();
+    for (input, output) in message.input.as_chunks::<16>().0.iter().zip(outputs) {
         let (p, q) = if encrypt { (0, 16) } else { (16, 0) };
         for i in 0..16 {
             block[i] = input[i] ^ state[p + i];

@@ -54,16 +54,45 @@ fn bucket(size: usize) -> u32 {
 fn class(message: &Message) -> (u32, Operation) {
     (bucket(message.input.len()), message.operation)
 }
+/// This thread's CPU time: excludes sleeping and other threads' work.
+#[cfg(unix)]
 fn cpu_ns() -> u64 {
     let mut time = libc::timespec {
         tv_sec: 0,
         tv_nsec: 0,
     };
-    // CLOCK_THREAD_CPUTIME_ID excludes sleeping and other threads' work.
     if unsafe { libc::clock_gettime(libc::CLOCK_THREAD_CPUTIME_ID, &mut time) } != 0 {
         return 0;
     }
     time.tv_sec as u64 * 1_000_000_000 + time.tv_nsec as u64
+}
+#[cfg(windows)]
+fn cpu_ns() -> u64 {
+    use windows_sys::Win32::{
+        Foundation::FILETIME,
+        System::Threading::{GetCurrentThread, GetThreadTimes},
+    };
+    let zero = FILETIME {
+        dwLowDateTime: 0,
+        dwHighDateTime: 0,
+    };
+    let (mut creation, mut exit, mut kernel, mut user) = (zero, zero, zero, zero);
+    // SAFETY: the pseudo-handle of the current thread, and four FILETIMEs to write.
+    if unsafe {
+        GetThreadTimes(
+            GetCurrentThread(),
+            &mut creation,
+            &mut exit,
+            &mut kernel,
+            &mut user,
+        )
+    } == 0
+    {
+        return 0;
+    }
+    let ticks = |t: FILETIME| (u64::from(t.dwHighDateTime) << 32) | u64::from(t.dwLowDateTime);
+    // FILETIME counts 100 ns intervals.
+    (ticks(kernel) + ticks(user)) * 100
 }
 impl Executor {
     pub fn new(capacity: usize, byte_limit: usize) -> Result<Self> {

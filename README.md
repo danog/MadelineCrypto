@@ -1,9 +1,24 @@
-# Optional Rust cryptography extension
+# madeline_crypto
 
-The Docker image includes `madeline_crypto`. Other installations use
-IGEFFI with system libcrypto, then ext-openssl and phpseclib for IGE, and the PHP
-builtins (openssl, hash) for the other primitives. The extension needs no library paths, FFI
-permissions or runtime compilation.
+Native (Rust) cryptography for [MadelineProto](https://github.com/danog/MadelineProto) and the
+[php-rtc](https://github.com/danog/php-rtc) stack: AES-256-IGE and MTProto 2.0 transport decoding on a
+worker thread (batched, off the PHP thread), and per-packet AES-GCM/CTR/CBC, hashes and HMAC, several
+times faster than the PHP builtins on small inputs. Optional: without it, MadelineProto and php-rtc use
+their PHP implementations.
+
+## Install
+
+With [PIE](https://github.com/php/pie) (PHP 8.2 or later, NTS):
+
+```sh
+pie install danog/madelinecrypto
+```
+
+PIE downloads a prebuilt binary when the release has one for the platform (Linux glibc 2.35+ x86_64
+and arm64, macOS arm64 and x86_64, Windows x86_64; PHP 8.2-8.5; OpenSSL linked statically), and
+otherwise builds from source, which needs [Rust](https://rustup.rs), libclang and the OpenSSL headers
+(see Build). The Docker image `danog/madelineproto` includes the extension.
+
 ## API 0.5: the per-packet and per-message primitives
 
 `Crypto::version()` is `0.5.0`; callers check
@@ -58,7 +73,7 @@ it has no dependency on the removed C helper.
 
 ## Build
 
-PHP 8.1 or later is required: the extension marks its classes `ZEND_ACC_NOT_SERIALIZABLE`, calls
+PHP 8.2 or later is required (8.1 would build, but isn't tested): the extension marks its classes `ZEND_ACC_NOT_SERIALIZABLE`, calls
 the engine's `zend_argument_type_error()` and `zend_zval_type_name()` from its raw method
 handlers, and allocates result strings with the `zend_string` header layout and `GC_STRING`
 type info of PHP 8 (as `zend_string_alloc()` does).
@@ -70,21 +85,42 @@ headers, a linker, pkg-config and libclang. Rust 1.92.0 is pinned by
 and byte limit, and `init()` returns php-tokio's notification stream; width is always selected
 adaptively.
 
+From source with PIE or phpize (configure finds cargo in `PATH` or `~/.cargo/bin`, or takes
+`--with-cargo=/path/to/cargo`):
+
 ```sh
-cd native
+phpize && ./configure && make && make install
+```
+
+Or with cargo alone:
+
+```sh
 cargo build --release --locked
 install -m 755 target/release/libmadeline_crypto.so "$(php-config --extension-dir)/madeline_crypto.so"
 printf 'extension=madeline_crypto.so\n' > /path/to/php/conf.d/madeline-crypto.ini
 php --ri madeline_crypto
 ```
 
+The `vendored-openssl` feature links a static OpenSSL built from source (it needs perl, and NASM
+on Windows): the prebuilt binaries use it.
+
 On macOS Cargo produces a `.dylib`; install it under the same `.so` extension
 name. `.cargo/config.toml` links it with `-undefined dynamic_lookup` (PHP's symbols resolve at load
 time) and skips the strip pass, whose output macOS 27's dyld rejects ("mis-aligned LINKEDIT string
-pool"). The extension currently targets Unix. Restart PHP processes after installation.
-Rust/Cargo/libclang exist only in the Docker build stage. TAS reuses a compatible
-base extension or builds against the base image's PHP; its sources are mirrored
-in `dev/crypto`.
+pool"). On Windows, ext-php-rs downloads the PHP development pack matching `php.exe`; set
+`LIBCLANG_PATH` to LLVM's `bin`. Restart PHP processes after installation.
+
+## Tests
+
+```sh
+cargo test --release --locked --no-default-features --features const-widths   # Rust, no PHP needed
+cargo build --release --locked && composer install
+php -d extension=$(tests/library-path.sh) vendor/bin/phpunit                  # against the PHP builtins
+```
+
+CI runs both on Linux (x86_64, arm64), macOS (arm64, x86_64) and Windows with PHP 8.2-8.5, and
+installs the extension through PIE from source. Publishing a GitHub release builds, tests and
+attaches the prebuilt binaries.
 
 ## Execution and ownership
 

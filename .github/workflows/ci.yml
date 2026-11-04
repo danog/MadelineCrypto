@@ -1,0 +1,89 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: "8.5"
+          coverage: none
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo fmt --check
+      - run: cargo clippy --release --locked --all-targets -- -D warnings
+      - run: composer validate --strict
+
+  test:
+    name: test (${{ matrix.os }}, PHP ${{ matrix.php }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, ubuntu-24.04-arm, macos-15, macos-15-intel, windows-2025]
+        php: ["8.2", "8.3", "8.4", "8.5"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: ${{ matrix.php }}
+          coverage: none
+          tools: composer
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: php${{ matrix.php }}
+      - name: Native dependencies
+        id: deps
+        shell: bash
+        run: tests/ci-deps.sh
+      - name: Rust tests (no PHP)
+        if: matrix.php == '8.5'
+        shell: bash
+        run: cargo test --release --locked --no-default-features --features "const-widths ${{ steps.deps.outputs.features }}"
+      - name: Build
+        shell: bash
+        run: cargo build --release --locked --features "${{ steps.deps.outputs.features }}"
+      - name: PHP tests
+        shell: bash
+        run: |
+          composer install --no-interaction --no-progress
+          php -d "extension=$(tests/library-path.sh)" vendor/bin/phpunit
+
+  pie:
+    name: pie install from source (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-15]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: "8.5"
+          coverage: none
+          tools: composer, pie
+      - name: Native dependencies
+        shell: bash
+        run: tests/ci-deps.sh
+      - name: Install with PIE
+        run: |
+          pie repository:add path "$PWD"
+          pie install 'danog/madelinecrypto:*@dev'
+          php -d extension=madeline_crypto -r 'echo phpversion("madeline_crypto"), "\n";'
+      - name: PHP tests against the installed extension
+        run: |
+          composer install --no-interaction --no-progress
+          php -d extension=madeline_crypto vendor/bin/phpunit

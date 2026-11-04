@@ -1,6 +1,6 @@
 [package]
 name = "madeline-crypto"
-version = "0.4.0"
+version = "0.5.1"
 edition = "2021"
 rust-version = "1.92"
 authors = ["Alexander Pankratov <s.pankratoff@gmail.com>", "Daniil Gentili <daniil@daniil.it>"]
@@ -20,6 +20,9 @@ zeroize = { version = "=1.9.1", features = ["derive"] }
 libc = "=0.2.191"
 ring = "=0.17.14"
 
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "=0.61.2", features = ["Win32_Foundation", "Win32_System_Threading"] }
+
 [profile.release]
 opt-level = 3
 lto = "thin"
@@ -30,3 +33,6 @@ default = ["php-extension", "const-widths"]
 php-extension = ["dep:ext-php-rs", "dep:php-tokio"]
 # Specialize widths 1–32; larger batches use the dynamic kernel.
 const-widths = []
+# Link a static OpenSSL built from source (needs perl and make, or perl and nmake on Windows): the
+# prebuilt PIE binaries, which can't rely on the libssl of the system they land on.
+vendored-openssl = ["openssl/vendored"]
