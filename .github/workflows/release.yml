@@ -55,3 +55,43 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: gh release upload "$TAG" ${{ steps.package.outputs.assets }} --clobber
+
+  # What users run: `pie install` of this release from Packagist, on every platform with a binary. PIE must
+  # pick the attached binary (not build from source: these runners have no Rust toolchain on PATH for it),
+  # and the installed extension must pass the test suite.
+  pie-install:
+    name: pie install (${{ matrix.os }}, PHP ${{ matrix.php }})
+    needs: build
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, ubuntu-24.04-arm, macos-15, macos-15-intel, windows-2025]
+        php: ["8.2", "8.5"]
+    env:
+      TAG: ${{ github.event.release.tag_name || inputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TAG }}
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: ${{ matrix.php }}
+          coverage: none
+          tools: composer, pie
+      - name: Install the release with PIE
+        shell: bash
+        run: |
+          # Packagist picks the tag up from GitHub's webhook: retry for a few minutes.
+          tests/pie-writable.sh
+          for i in $(seq 1 20); do
+            if pie install --skip-enable-extension "danog/madelinecrypto:$TAG" 2>&1 | tee pie.log; then break; fi
+            sleep 30
+          done
+          grep -q 'Found prebuilt archive' pie.log || { echo "PIE didn't use the prebuilt binary"; exit 1; }
+          php -d extension=madeline_crypto -r 'echo phpversion("madeline_crypto"), "\n";' | grep -qx "$TAG"
+      - name: Test the installed extension
+        shell: bash
+        run: |
+          composer install --no-interaction --no-progress
+          php -d extension=madeline_crypto vendor/bin/phpunit

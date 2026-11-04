@@ -17,6 +17,10 @@ case "$(uname -s)" in
     choco install -y --no-progress nasm >/dev/null
     echo "C:\\Program Files\\NASM" >> "$GITHUB_PATH"
     echo "LIBCLANG_PATH=C:\\Program Files\\LLVM\\bin" >> "$GITHUB_ENV"
+    # openssl-src's Configure needs a native perl: the bash steps would find Git's MSYS perl, which lacks
+    # modules (Locale::Maketext::Simple) and makes OpenSSL configure for the wrong platform.
+    echo "OPENSSL_SRC_PERL=C:\\Strawberry\\perl\\bin\\perl.exe" >> "$GITHUB_ENV"
+    echo "PERL=C:\\Strawberry\\perl\\bin\\perl.exe" >> "$GITHUB_ENV"
     features="vendored-openssl"
     ;;
 esac

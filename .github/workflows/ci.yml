@@ -80,8 +80,9 @@ jobs:
         run: tests/ci-deps.sh
       - name: Install with PIE
         run: |
+          tests/pie-writable.sh
           pie repository:add path "$PWD"
-          pie install 'danog/madelinecrypto:*@dev'
+          pie install --skip-enable-extension 'danog/madelinecrypto:*@dev'
           php -d extension=madeline_crypto -r 'echo phpversion("madeline_crypto"), "\n";'
       - name: PHP tests against the installed extension
         run: |
