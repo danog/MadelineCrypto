@@ -5,21 +5,6 @@
 //! batched gcds, in Montgomery form. Every u64 works. (SQUFOF, with multipliers and a modular
 //! square filter, was 2x slower on live MTProto pq, with a worse tail: 4-6.5 ms p99 against 1.2-2.4.)
 
-fn mul_mod(a: u64, b: u64, m: u64) -> u64 {
-    (u128::from(a) * u128::from(b) % u128::from(m)) as u64
-}
-fn pow_mod(mut base: u64, mut exp: u64, m: u64) -> u64 {
-    let mut result = 1 % m;
-    base %= m;
-    while exp > 0 {
-        if exp & 1 == 1 {
-            result = mul_mod(result, base, m);
-        }
-        base = mul_mod(base, base, m);
-        exp >>= 1;
-    }
-    result
-}
 fn gcd(mut a: u64, mut b: u64) -> u64 {
     while b != 0 {
         (a, b) = (b, a % b);
@@ -27,7 +12,7 @@ fn gcd(mut a: u64, mut b: u64) -> u64 {
     a
 }
 
-/// Deterministic for every u64 with these bases.
+/// Deterministic for every u64 with these bases. In Montgomery form: no 128-bit division per product.
 pub fn is_prime(n: u64) -> bool {
     const BASES: [u64; 12] = [2, 3, 5, 7, 11, 13, 17, 19, 23, 29, 31, 37];
     if n < 2 {
@@ -43,14 +28,16 @@ pub fn is_prime(n: u64) -> bool {
         d /= 2;
         s += 1;
     }
+    let m = Montgomery::new(n);
+    let (one, minus_one) = (m.to_mont(1), m.to_mont(n - 1));
     'bases: for a in BASES {
-        let mut x = pow_mod(a, d, n);
-        if x == 1 || x == n - 1 {
+        let mut x = m.pow(m.to_mont(a), d);
+        if x == one || x == minus_one {
             continue;
         }
         for _ in 1..s {
-            x = mul_mod(x, x, n);
-            if x == n - 1 {
+            x = m.mul(x, x);
+            if x == minus_one {
                 continue 'bases;
             }
         }
@@ -65,6 +52,8 @@ struct Montgomery {
     n: u64,
     /// n^-1 mod 2^64.
     inv: u64,
+    /// R^2 mod n: to_mont() is a product by it (the one 128-bit division is here).
+    r2: u64,
 }
 impl Montgomery {
     fn new(n: u64) -> Self {
@@ -74,7 +63,9 @@ impl Montgomery {
         for _ in 0..5 {
             inv = inv.wrapping_mul(2u64.wrapping_sub(n.wrapping_mul(inv)));
         }
-        Self { n, inv }
+        let r1 = ((1u128 << 64) % u128::from(n)) as u64;
+        let r2 = (u128::from(r1) * u128::from(r1) % u128::from(n)) as u64;
+        Self { n, inv, r2 }
     }
     /// t / R mod n, for t < n * R: (t - m n) / R with m = t n^-1 mod R, whose low halves cancel.
     fn reduce(&self, t: u128) -> u64 {
@@ -91,7 +82,19 @@ impl Montgomery {
         self.reduce(u128::from(a) * u128::from(b))
     }
     fn to_mont(&self, a: u64) -> u64 {
-        ((u128::from(a) << 64) % u128::from(self.n)) as u64
+        self.mul(a % self.n, self.r2)
+    }
+    /// base^exp, in Montgomery form (base too).
+    fn pow(&self, mut base: u64, mut exp: u64) -> u64 {
+        let mut result = self.to_mont(1);
+        while exp > 0 {
+            if exp & 1 == 1 {
+                result = self.mul(result, base);
+            }
+            base = self.mul(base, base);
+            exp >>= 1;
+        }
+        result
     }
     fn add(&self, a: u64, b: u64) -> u64 {
         let (s, carry) = a.overflowing_add(b);
