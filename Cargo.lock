@@ -696,7 +696,7 @@ dependencies = [
 
 [[package]]
 name = "madeline-crypto"
-version = "0.6.2"
+version = "0.6.3"
 dependencies = [
  "ext-php-rs",
  "foreign-types",
@@ -919,9 +919,9 @@ checksum = "9b4f627cb1b25917193a259e49bdad08f671f8d9708acfd5fe0a8c1455d87220"
 
 [[package]]
 name = "php-tokio"
-version = "0.2.1"
+version = "0.2.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ed9173cd216ef04071185df0a20b6f7a469bbf7d2e10205ef3c6ab66232e53af"
+checksum = "fe694efc9b66312a31e585fb7d61974070b5e45822ca40e7eac76a7936f70adf"
 dependencies = [
  "ext-php-rs",
  "lazy_static",

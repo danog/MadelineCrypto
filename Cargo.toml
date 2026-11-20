@@ -1,6 +1,6 @@
 [package]
 name = "madeline-crypto"
-version = "0.6.2"
+version = "0.6.3"
 edition = "2021"
 rust-version = "1.95"
 authors = ["Alexander Pankratov <s.pankratoff@gmail.com>", "Daniil Gentili <daniil@daniil.it>"]
@@ -11,7 +11,7 @@ crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 ext-php-rs = { version = "=0.16.5", optional = true }
-php-tokio = { version = "=0.2.1", optional = true }
+php-tokio = { version = "=0.2.3", optional = true }
 tokio = { version = "=1.54.1", features = ["rt-multi-thread", "sync"] }
 openssl = "=0.10.81"
 openssl-sys = "=0.9.117"
