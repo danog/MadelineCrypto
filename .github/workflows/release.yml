@@ -16,14 +16,19 @@ permissions:
 
 jobs:
   build:
-    name: ${{ matrix.os }}, PHP ${{ matrix.php }}
+    name: ${{ matrix.os }}, PHP ${{ matrix.php }} ${{ matrix.ts }}
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
         # Linux binaries are built on Ubuntu 22.04: they need glibc 2.35 or later.
         os: [ubuntu-22.04, ubuntu-22.04-arm, macos-15, macos-15-intel, windows-2022]
-        php: ["8.2", "8.3", "8.4", "8.5"]
+        php: ["8.2", "8.3", "8.4", "8.5", "8.6"]
+        ts: [nts]
+        include:
+          # thread-safe builds of PHP 8.6 too: docker-library's images of 8.6 are only ZTS
+          - { os: ubuntu-22.04, php: "8.6", ts: ts }
+          - { os: ubuntu-22.04-arm, php: "8.6", ts: ts }
     env:
       TAG: ${{ github.event.release.tag_name || inputs.tag }}
     steps:
@@ -35,9 +40,11 @@ jobs:
           php-version: ${{ matrix.php }}
           coverage: none
           tools: composer
+        env:
+          phpts: ${{ matrix.ts || 'nts' }}
       - name: MSVC toolset of the PHP build (Windows)
         # PHP refuses extensions linked with a newer toolset than its own: 14.29 (VS16) for PHP 8.2/8.3,
-        # 14.4x (VS17) for 8.4/8.5, as php-windows-builder does.
+        # 14.4x (VS17) for 8.4/8.5, as php-windows-builder does; 8.6 (VS18) gets 14.4x too, the newest of windows-2022.
         if: runner.os == 'Windows'
         uses: ilammy/msvc-dev-cmd@v1
         with:
@@ -75,7 +82,7 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-24.04, ubuntu-24.04-arm, macos-15, macos-15-intel, windows-2022]
-        php: ["8.2", "8.5"]
+        php: ["8.2", "8.5", "8.6"]
     env:
       TAG: ${{ github.event.release.tag_name || inputs.tag }}
     steps:

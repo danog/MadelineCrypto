@@ -36,9 +36,6 @@ impl Crypto {
     }
     /// Returns the stream to watch for php-tokio's notifications.
     pub fn init(capacity: i64, byte_limit: i64) -> PhpResult<Zval> {
-        if ext_php_rs::PHP_ZTS {
-            return Err("The crypto worker currently requires NTS PHP".into());
-        }
         if capacity < 0 || byte_limit < 0 {
             return Err("Negative crypto limits".into());
         }
