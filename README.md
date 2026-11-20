@@ -8,7 +8,7 @@ use their PHP implementations.
 
 ## Install
 
-With [PIE](https://github.com/php/pie) (PHP 8.2+, NTS):
+With [PIE](https://github.com/php/pie) (PHP 8.2+; pre-built binaries for NTS, and for ZTS on Linux with PHP 8.6):
 
 ```sh
 pie install danog/madelinecrypto
